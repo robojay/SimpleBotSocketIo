@@ -1,24 +1,13 @@
+// SimpleBotSocketIo.ino ~ Succesfully built w/ Arduino IDE 1.6.10
 #include "SimpleBot.h"
-
-#define SOFTAP_MODE
-
-#ifdef SOFTAP_MODE
-const char* password = "myMinion";
-#else
-const char* ssid = "SkyNet";
-const char* password = "myMaster";
-#endif
+#include "personalWifi.h"
 
 const char HexLookup[17] = "0123456789ABCDEF";
 
-String host = "192.168.4.2";
-int port = 3000;
-
-SocketIOClient client;
+SocketIOClient socket;
 JS_Timer timer = JS_Timer();
 
 void setupNetwork() {
-
   #ifdef SOFTAP_MODE
     WiFi.disconnect();
     byte mac[6];
@@ -40,7 +29,6 @@ void setupNetwork() {
       while(1) delay(500);
     }
   #endif
-
 }
 
 // stop the motors
@@ -55,20 +43,20 @@ void stop() {
 void left(float percent) {
   static float lastPwm = 0.0;
   static bool lastForward = true;
-  
+
   percent = constrain(percent, -1.0, 1.0);
   bool forward = (percent >= 0) ? true : false;
-  uint16_t pwm = PWMRANGE - int(abs(percent) * PWMRANGE); 
+  uint16_t pwm = PWMRANGE - int(abs(percent) * PWMRANGE);
   // only change pwm and direction if it is different
   if ( (pwm != lastPwm) || (forward != lastForward) ) {
     lastPwm = pwm;
     lastForward = forward;
     if (forward) {
       analogWrite(LeftIn1Pin, PWMRANGE);
-      analogWrite(LeftIn2Pin, pwm);           
+      analogWrite(LeftIn2Pin, pwm);
     }
     else {
-      analogWrite(LeftIn1Pin, pwm);           
+      analogWrite(LeftIn1Pin, pwm);
       analogWrite(LeftIn2Pin, PWMRANGE);
     }
   }
@@ -81,20 +69,20 @@ void left(float percent) {
 void right(float percent) {
   static float lastPwm = 0.0;
   static bool lastForward = true;
-  
+
   percent = constrain(percent, -1.0, 1.0);
   bool forward = (percent >= 0) ? true : false;
-  uint16_t pwm = PWMRANGE - int(abs(percent) * PWMRANGE); 
+  uint16_t pwm = PWMRANGE - int(abs(percent) * PWMRANGE);
   // only change pwm and direction if it is different
   if ( (pwm != lastPwm) || (forward != lastForward) ) {
     lastPwm = pwm;
     lastForward = forward;
     if (forward) {
       analogWrite(RightIn1Pin, PWMRANGE);
-      analogWrite(RightIn2Pin, pwm);           
+      analogWrite(RightIn2Pin, pwm);
     }
     else {
-      analogWrite(RightIn1Pin, pwm);           
+      analogWrite(RightIn1Pin, pwm);
       analogWrite(RightIn2Pin, PWMRANGE);
     }
   }
@@ -117,12 +105,12 @@ String master = "";
 
 void setState(String newState) {
   status = newState;
-  client.emit("here", "{\"id\":false, \"status\":\"" + status + "\"}");  
+  socket.emit("here", "{\"id\":false, \"status\":\"" + status + "\"}");
 }
 
 void emitState() {
-  if (client.connected()) {
-    client.emit("here", "{\"id\":false, \"status\":\"" + status + "\"}");  
+  if (socket.connected()) {
+    socket.emit("here", "{\"id\":false, \"status\":\"" + status + "\"}");
   }
   else {
     status = "open";
@@ -130,7 +118,7 @@ void emitState() {
 }
 
 void botFind(String from) {
-  client.emit("here", "{\"id\":\""+ from + "\", \"status\":\"" + status + "\"}");
+  socket.emit("here", "{\"id\":\""+ from + "\", \"status\":\"" + status + "\"}");
 }
 
 void own(String from) {
@@ -152,8 +140,7 @@ void remote(String data) {
   static float speedSetting = 1.0;
   float l, r;
 
-  if (data.length() != 2)
-    return;
+  if (data.length() != 2){ return; }
 
   if (data.startsWith(CmdSpeed)) {
     bool valid = true;
@@ -260,12 +247,12 @@ void setup() {
 
   setupNetwork();
 
-  client.on("botFind", botFind);
-  client.on("own", own);
-  client.on("relinquish", relinquish);
-  client.on("remote", remote);
-  
-  client.connect(host, port);
+  socket.on("botFind", botFind);
+  socket.on("own", own);
+  socket.on("relinquish", relinquish);
+  socket.on("remote", remote);
+
+  socket.connect(SocketHost, SocketPort);
 
   timer.setInterval(emitState, StatusTime);
 }
@@ -275,7 +262,7 @@ void setup() {
 //
 void loop() {
   timer.todoChecker();
-  client.monitor();
+  socket.monitor();
 }
 
 
