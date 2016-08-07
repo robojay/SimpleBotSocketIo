@@ -100,42 +100,9 @@ void pivot(float percent) {
   right(percent);
 }
 
-String status = "open";  // ?? was down in original code ??
-String master = "";
-
-void setState(String newState) {
-  status = newState;
-  socket.emit("here", "{\"id\":false, \"status\":\"" + status + "\"}");
-}
-
-void emitState() {
-  if (socket.connected()) {
-    socket.emit("here", "{\"id\":false, \"status\":\"" + status + "\"}");
-  }
-  else {
-    status = "open";
-  }
-}
-
-void botFind(String from) {
-  socket.emit("here", "{\"id\":\""+ from + "\", \"status\":\"" + status + "\"}");
-}
-
-void own(String from) {
-  // ?? is it ok that any master can take over at any time ??
-  master = from;
-  setState("taken");
-}
-
-void relinquish(String from) {
-  if (master == from) {
-    master = "";
-    if (status == "taken") {
-      setState("open");
-    }
-  }
-}
-
+//
+// socket events
+//
 void remote(String data) {
   static float speedSetting = 1.0;
   float l, r;
@@ -228,18 +195,41 @@ void remote(String data) {
   }
 }
 
+String status = "open";
+String master = "";
+
+void broadcastState(String newState) {
+  status = newState;
+  socket.emit("here", "{\"id\":false, \"status\":\"" + status + "\"}");
+}
+
+void botFind(String from) {
+  socket.emit("here", "{\"id\":\""+ from + "\", \"status\":\"" + status + "\"}");
+}
+
+void own(String from) {
+  master = from;
+  broadcastState("taken");
+}
+
+void relinquish(String from) {
+  if (master == from) {
+    master = "";
+    if (status == "taken") {
+      broadcastState("open");
+    }
+  }
+}
 
 //
 // This code runs only once
 //
 void setup() {
-
   // set up our output pins
   pinMode(RightIn1Pin, OUTPUT);
   pinMode(RightIn2Pin, OUTPUT);
   pinMode(LeftIn1Pin, OUTPUT);
   pinMode(LeftIn2Pin, OUTPUT);
-
   // inialize the output pins
   stop();
 
@@ -247,21 +237,17 @@ void setup() {
 
   setupNetwork();
 
+  socket.connect(SocketHost, SocketPort);
   socket.on("botFind", botFind);
   socket.on("own", own);
   socket.on("relinquish", relinquish);
   socket.on("remote", remote);
-
-  socket.connect(SocketHost, SocketPort);
-
-  timer.setInterval(emitState, StatusTime);
 }
 
 //
 // This code runs over and over again
 //
 void loop() {
-  timer.todoChecker();
   socket.monitor();
 }
 
