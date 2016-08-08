@@ -197,26 +197,26 @@ void remote(String data) {
 
 String status = "open";
 String master = "";
-
-void broadcastState(String newState) {
-  status = newState;
-  socket.emit("here", "{\"id\":false, \"status\":\"" + status + "\"}");
-}
+String ID = "{\"id\":";                    // first line item of JSON
+String StatusKey = ", \"status\":\"";      // middle line item
+String BotType = "\", \"type\":\"base\"}"; // last line item defines head/body
 
 void botFind(String from) {
-  socket.emit("here", "{\"id\":\""+ from + "\", \"status\":\"" + status + "\"}");
+  socket.emit("here", ID + "\"" + from + "\"" + StatusKey + status + BotType);
 }
 
 void own(String from) {
   master = from;
-  broadcastState("taken");
+  status = "taken";
+  socket.emit("here", ID + "false" + StatusKey + status + BotType);
 }
 
 void relinquish(String from) {
   if (master == from) {
     master = "";
     if (status == "taken") {
-      broadcastState("open");
+      status = "open";
+      socket.emit("here", ID + "false" + StatusKey + status + BotType);
     }
   }
 }
@@ -250,6 +250,4 @@ void setup() {
 void loop() {
   socket.monitor();
 }
-
-
 
