@@ -13,28 +13,80 @@ void setupNetwork() {
     byte mac[6];
     WiFi.macAddress(mac);
     char ssid[14] = "Minion-000000";
-    ssid[7] = HexLookup[(mac[3] & 0xf0) >> 4];
-    ssid[8] = HexLookup[(mac[3] & 0x0f)];
-    ssid[9] = HexLookup[(mac[4] & 0xf0) >> 4];
+    ssid[7]  = HexLookup[(mac[3] & 0xf0) >> 4];
+    ssid[8]  = HexLookup[(mac[3] & 0x0f)];
+    ssid[9]  = HexLookup[(mac[4] & 0xf0) >> 4];
     ssid[10] = HexLookup[(mac[4] & 0x0f)];
     ssid[11] = HexLookup[(mac[5] & 0xf0) >> 4];
     ssid[12] = HexLookup[(mac[5] & 0x0f)];
     ssid[13] = 0;
     WiFi.softAP(ssid, password);
   #else
-    WiFi.begin(ssid, password);
+    WiFi.begin(ssid[0], password[0]);
     uint8_t i = 0;
-    while (WiFi.status() != WL_CONNECTED && i++ < 20) delay(500);
+    while (WiFi.status() != WL_CONNECTED && i++ < 20) { delay(500); }
     if(i == 21){
-      while(1) delay(500);
+      while(1) { delay(500); }
     }
   #endif
+}
+
+void findWifi(){              // recursively checks for a connection every x millis
+  static byte network = 0;    // which network to try
+  static byte attempt = 0;    // how many attempts have been made on any given network
+
+  if (WiFi.status() == WL_CONNECTED){
+    Serial.println("connected");
+    socket.connect(SocketHost, SocketPort);
+    attempt = 0;              // start from 0 attempts after connected
+    timer.setTimeout(checkWifi, 1000);
+  } else {
+    Serial.print("attempt: ");
+    Serial.println(attempt);
+    if(attempt){
+      if ( attempt > 20 ){    // after 2 seconds worth of attempts
+        if(network > 2 ){ network = 0;}
+        else{network++;}
+        attempt = 0;
+      } else {
+        attempt++;
+      }
+    } else { // given no attempts have been made
+      socket.disconnect();
+      Serial.print("disconnected, try network:");
+      Serial.println(network);
+      WiFi.begin(ssid[network], password[network]);
+      attempt++;
+    }
+    timer.setTimeout(findWifi, 500);
+  }
+
+}
+
+void checkWifi(){ // checks status of wifi to determine whether it needs to be found again
+  if (WiFi.status() == WL_CONNECTED){
+    timer.setTimeout(checkWifi, 1000);
+  } else {
+    timer.setTimeout(findWifi, 500);
+  }
 }
 
 // stop the motors
 void stop() {
   left(0);
   right(0);
+}
+
+void straight(float percent) {
+  left(percent);
+  right(percent);
+}
+
+// pivot in place
+// counter-clockwise is positive
+void pivot(float percent) {
+  left(-percent);
+  right(percent);
 }
 
 // drive left motors
@@ -88,17 +140,6 @@ void right(float percent) {
   }
 }
 
-void straight(float percent) {
-  left(percent);
-  right(percent);
-}
-
-// pivot in place
-// counter-clockwise is positive
-void pivot(float percent) {
-  left(-percent);
-  right(percent);
-}
 
 //
 // socket events
@@ -230,24 +271,27 @@ void setup() {
   pinMode(RightIn2Pin, OUTPUT);
   pinMode(LeftIn1Pin, OUTPUT);
   pinMode(LeftIn2Pin, OUTPUT);
-  // inialize the output pins
-  stop();
+  stop(); // inialize the output pins
 
   Serial.begin(115200);
 
-  setupNetwork();
+  // setupNetwork();
+  findWifi();
 
-  socket.connect(SocketHost, SocketPort);
   socket.on("botFind", botFind);
   socket.on("own", own);
   socket.on("relinquish", relinquish);
   socket.on("remote", remote);
+  socket.emit("here", ID + "false" + StatusKey + status + BotType);
 }
 
 //
 // This code runs over and over again
 //
 void loop() {
-  socket.monitor();
+  timer.todoChecker();
+  if (WiFi.status() == WL_CONNECTED){
+    socket.monitor();
+  }
 }
 
