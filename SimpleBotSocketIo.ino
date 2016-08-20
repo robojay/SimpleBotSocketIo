@@ -309,7 +309,6 @@ void loop() {
   timer.todoChecker();
   if (WiFi.status() == WL_CONNECTED){
     if(socket.monitor()){ // returns true on connect
-        Serial.println("connect event");
         botConnect();      // signal open on connect
     }
   }
