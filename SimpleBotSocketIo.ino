@@ -1,103 +1,76 @@
+// SimpleBotSocketIo.ino ~ Succesfully built w/ Arduino IDE 1.6.10
 #include "SimpleBot.h"
+#include "personalWifi.h"
 
-#define SOFTAP_MODE
+const char HexLookup[17] = "0123456789ABCDEF"; // look up mac hex
+char uniqueID[14] = "Minion-000000";           // unique id to populate w/ mac address
 
-#ifdef SOFTAP_MODE
-const char* password = "myMinion";
-#else
-const char* ssid = "SkyNet";
-const char* password = "myMaster";
-#endif
-
-const char HexLookup[17] = "0123456789ABCDEF";
-
-String host = "192.168.4.2";
-int port = 3000;
-
-SocketIOClient client;
+SocketIOClient socket;
 JS_Timer timer = JS_Timer();
 
 void setupNetwork() {
-
   #ifdef SOFTAP_MODE
     WiFi.disconnect();
     byte mac[6];
     WiFi.macAddress(mac);
     char ssid[14] = "Minion-000000";
-    ssid[7] = HexLookup[(mac[3] & 0xf0) >> 4];
-    ssid[8] = HexLookup[(mac[3] & 0x0f)];
-    ssid[9] = HexLookup[(mac[4] & 0xf0) >> 4];
+    ssid[7]  = HexLookup[(mac[3] & 0xf0) >> 4];
+    ssid[8]  = HexLookup[(mac[3] & 0x0f)];
+    ssid[9]  = HexLookup[(mac[4] & 0xf0) >> 4];
     ssid[10] = HexLookup[(mac[4] & 0x0f)];
     ssid[11] = HexLookup[(mac[5] & 0xf0) >> 4];
     ssid[12] = HexLookup[(mac[5] & 0x0f)];
     ssid[13] = 0;
     WiFi.softAP(ssid, password);
   #else
-    WiFi.begin(ssid, password);
+    WiFi.begin(ssid[0], password[0]);
     uint8_t i = 0;
-    while (WiFi.status() != WL_CONNECTED && i++ < 20) delay(500);
+    while (WiFi.status() != WL_CONNECTED && i++ < 20) { delay(500); }
     if(i == 21){
-      while(1) delay(500);
+      while(1) { delay(500); }
     }
   #endif
+}
 
+void findWifi(){              // recursively checks for a connection every x millis
+  static byte network = 0;    // which network to try
+  static byte attempt = 0;    // how many attempts have been made on any given network
+
+  if (WiFi.status() == WL_CONNECTED){
+    socket.connect(SocketHost, SocketPort);
+    attempt = 0;              // start from 0 attempts after connected
+    timer.setTimeout(checkWifi, 1000);
+  } else {
+    if(attempt){
+      if ( attempt > 20 ){    // after 2 seconds worth of attempts
+        if(network > 2 ){ network = 0;}
+        else{network++;}
+        attempt = 0;
+      } else {
+        attempt++;
+      }
+    } else { // given no attempts have been made
+      socket.disconnect();
+      WiFi.begin(ssid[network], password[network]);
+      attempt++;
+    }
+    timer.setTimeout(findWifi, 500);
+  }
+
+}
+
+void checkWifi(){ // checks status of wifi to determine whether it needs to be found again
+  if (WiFi.status() == WL_CONNECTED){
+    timer.setTimeout(checkWifi, 1000);
+  } else {
+    timer.setTimeout(findWifi, 500);
+  }
 }
 
 // stop the motors
 void stop() {
   left(0);
   right(0);
-}
-
-// drive left motors
-// percent should be from -1 to 1
-// positive is forward (A terminal positive)
-void left(float percent) {
-  static float lastPwm = 0.0;
-  static bool lastForward = true;
-  
-  percent = constrain(percent, -1.0, 1.0);
-  bool forward = (percent >= 0) ? true : false;
-  uint16_t pwm = PWMRANGE - int(abs(percent) * PWMRANGE); 
-  // only change pwm and direction if it is different
-  if ( (pwm != lastPwm) || (forward != lastForward) ) {
-    lastPwm = pwm;
-    lastForward = forward;
-    if (forward) {
-      analogWrite(LeftIn1Pin, PWMRANGE);
-      analogWrite(LeftIn2Pin, pwm);           
-    }
-    else {
-      analogWrite(LeftIn1Pin, pwm);           
-      analogWrite(LeftIn2Pin, PWMRANGE);
-    }
-  }
-}
-
-
-// drive right motors
-// percent should be from -1 to 1
-// positive is forward (A terminal positive)
-void right(float percent) {
-  static float lastPwm = 0.0;
-  static bool lastForward = true;
-  
-  percent = constrain(percent, -1.0, 1.0);
-  bool forward = (percent >= 0) ? true : false;
-  uint16_t pwm = PWMRANGE - int(abs(percent) * PWMRANGE); 
-  // only change pwm and direction if it is different
-  if ( (pwm != lastPwm) || (forward != lastForward) ) {
-    lastPwm = pwm;
-    lastForward = forward;
-    if (forward) {
-      analogWrite(RightIn1Pin, PWMRANGE);
-      analogWrite(RightIn2Pin, pwm);           
-    }
-    else {
-      analogWrite(RightIn1Pin, pwm);           
-      analogWrite(RightIn2Pin, PWMRANGE);
-    }
-  }
 }
 
 void straight(float percent) {
@@ -112,48 +85,66 @@ void pivot(float percent) {
   right(percent);
 }
 
-String status = "open";  // ?? was down in original code ??
-String master = "";
+// drive left motors
+// percent should be from -1 to 1
+// positive is forward (A terminal positive)
+void left(float percent) {
+  static float lastPwm = 0.0;
+  static bool lastForward = true;
 
-void setState(String newState) {
-  status = newState;
-  client.emit("here", "{\"id\":false, \"status\":\"" + status + "\"}");  
-}
-
-void emitState() {
-  if (client.connected()) {
-    client.emit("here", "{\"id\":false, \"status\":\"" + status + "\"}");  
-  }
-  else {
-    status = "open";
-  }
-}
-
-void botFind(String from) {
-  client.emit("here", "{\"id\":\""+ from + "\", \"status\":\"" + status + "\"}");
-}
-
-void own(String from) {
-  // ?? is it ok that any master can take over at any time ??
-  master = from;
-  setState("taken");
-}
-
-void relinquish(String from) {
-  if (master == from) {
-    master = "";
-    if (status == "taken") {
-      setState("open");
+  percent = constrain(percent, -1.0, 1.0);
+  bool forward = (percent >= 0) ? true : false;
+  uint16_t pwm = PWMRANGE - int(abs(percent) * PWMRANGE);
+  // only change pwm and direction if it is different
+  if ( (pwm != lastPwm) || (forward != lastForward) ) {
+    lastPwm = pwm;
+    lastForward = forward;
+    if (forward) {
+      analogWrite(LeftIn1Pin, PWMRANGE);
+      analogWrite(LeftIn2Pin, pwm);
+    }
+    else {
+      analogWrite(LeftIn1Pin, pwm);
+      analogWrite(LeftIn2Pin, PWMRANGE);
     }
   }
 }
 
+
+// drive right motors
+// percent should be from -1 to 1
+// positive is forward (A terminal positive)
+void right(float percent) {
+  static float lastPwm = 0.0;
+  static bool lastForward = true;
+
+  percent = constrain(percent, -1.0, 1.0);
+  bool forward = (percent >= 0) ? true : false;
+  uint16_t pwm = PWMRANGE - int(abs(percent) * PWMRANGE);
+  // only change pwm and direction if it is different
+  if ( (pwm != lastPwm) || (forward != lastForward) ) {
+    lastPwm = pwm;
+    lastForward = forward;
+    if (forward) {
+      analogWrite(RightIn1Pin, PWMRANGE);
+      analogWrite(RightIn2Pin, pwm);
+    }
+    else {
+      analogWrite(RightIn1Pin, pwm);
+      analogWrite(RightIn2Pin, PWMRANGE);
+    }
+  }
+}
+
+
+//
+// socket events
+//
 void remote(String data) {
   static float speedSetting = 1.0;
   float l, r;
 
-  if (data.length() != 2)
-    return;
+  if (data.length() != 2){ return; }
 
   if (data.startsWith(CmdSpeed)) {
     bool valid = true;
@@ -241,33 +232,74 @@ void remote(String data) {
   }
 }
 
+String status = "open";
+String master = "";
+String ID = "{\"id\":";               // first line item of JSON
+String StatusKey = ", \"status\":\""; // middle line item
+String BotType = "\", \"type\":\"";   // last line item defines head/body
+
+void getUniqueID(){
+  WiFi.disconnect();
+  byte mac[6];
+  WiFi.macAddress(mac);
+  uniqueID[7]  = HexLookup[(mac[3] & 0xf0) >> 4];
+  uniqueID[8]  = HexLookup[(mac[3] & 0x0f)];
+  uniqueID[9]  = HexLookup[(mac[4] & 0xf0) >> 4];
+  uniqueID[10] = HexLookup[(mac[4] & 0x0f)];
+  uniqueID[11] = HexLookup[(mac[5] & 0xf0) >> 4];
+  uniqueID[12] = HexLookup[(mac[5] & 0x0f)];
+  uniqueID[13] = 0;
+  String UID = String(uniqueID);
+  BotType = BotType + UID + "\"}";    // Complete contstruction of Json messages
+}
+
+void botFind(String from) {
+  socket.emit("here", ID + "\"" + from + "\"" + StatusKey + status + BotType);
+}
+
+void botConnect(){
+  status = "open";
+  socket.emit("here", ID + "false" + StatusKey + status + BotType);
+}
+
+void own(String from) {
+  master = from;
+  status = "taken";
+  socket.emit("here", ID + "false" + StatusKey + status + BotType);
+}
+
+void relinquish(String from) {
+  if (master == from) {
+    master = "";
+    if (status == "taken") {
+      status = "open";
+      socket.emit("here", ID + "false" + StatusKey + status + BotType);
+    }
+  }
+}
 
 //
 // This code runs only once
 //
 void setup() {
-
   // set up our output pins
   pinMode(RightIn1Pin, OUTPUT);
   pinMode(RightIn2Pin, OUTPUT);
   pinMode(LeftIn1Pin, OUTPUT);
   pinMode(LeftIn2Pin, OUTPUT);
-
-  // inialize the output pins
-  stop();
+  stop(); // inialize the output pins
 
   Serial.begin(115200);
 
-  setupNetwork();
+  // setupNetwork();
+  getUniqueID();
+  findWifi();
 
-  client.on("botFind", botFind);
-  client.on("own", own);
-  client.on("relinquish", relinquish);
-  client.on("remote", remote);
-  
-  client.connect(host, port);
-
-  timer.setInterval(emitState, StatusTime);
+  socket.on("botFind", botFind);
+  socket.on("own", own);
+  socket.on("relinquish", relinquish);
+  socket.on("remote", remote);
+  socket.emit("here", ID + "false" + StatusKey + status + BotType);
 }
 
 //
@@ -275,8 +307,10 @@ void setup() {
 //
 void loop() {
   timer.todoChecker();
-  client.monitor();
+  if (WiFi.status() == WL_CONNECTED){
+    if(socket.monitor()){ // returns true on connect
+        botConnect();      // signal open on connect
+    }
+  }
 }
-
-
 
