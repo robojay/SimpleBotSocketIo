@@ -2,7 +2,8 @@
 #include "SimpleBot.h"
 #include "personalWifi.h"
 
-const char HexLookup[17] = "0123456789ABCDEF";
+const char HexLookup[17] = "0123456789ABCDEF"; // look up mac hex
+char uniqueID[14] = "Minion-000000";           // unique id to populate w/ mac address
 
 SocketIOClient socket;
 JS_Timer timer = JS_Timer();
@@ -36,13 +37,10 @@ void findWifi(){              // recursively checks for a connection every x mil
   static byte attempt = 0;    // how many attempts have been made on any given network
 
   if (WiFi.status() == WL_CONNECTED){
-    Serial.println("connected");
     socket.connect(SocketHost, SocketPort);
     attempt = 0;              // start from 0 attempts after connected
     timer.setTimeout(checkWifi, 1000);
   } else {
-    Serial.print("attempt: ");
-    Serial.println(attempt);
     if(attempt){
       if ( attempt > 20 ){    // after 2 seconds worth of attempts
         if(network > 2 ){ network = 0;}
@@ -53,8 +51,6 @@ void findWifi(){              // recursively checks for a connection every x mil
       }
     } else { // given no attempts have been made
       socket.disconnect();
-      Serial.print("disconnected, try network:");
-      Serial.println(network);
       WiFi.begin(ssid[network], password[network]);
       attempt++;
     }
@@ -238,12 +234,32 @@ void remote(String data) {
 
 String status = "open";
 String master = "";
-String ID = "{\"id\":";                    // first line item of JSON
-String StatusKey = ", \"status\":\"";      // middle line item
-String BotType = "\", \"type\":\"base\"}"; // last line item defines head/body
+String ID = "{\"id\":";               // first line item of JSON
+String StatusKey = ", \"status\":\""; // middle line item
+String BotType = "\", \"type\":\"";   // last line item defines head/body
+
+void getUniqueID(){
+  WiFi.disconnect();
+  byte mac[6];
+  WiFi.macAddress(mac);
+  uniqueID[7]  = HexLookup[(mac[3] & 0xf0) >> 4];
+  uniqueID[8]  = HexLookup[(mac[3] & 0x0f)];
+  uniqueID[9]  = HexLookup[(mac[4] & 0xf0) >> 4];
+  uniqueID[10] = HexLookup[(mac[4] & 0x0f)];
+  uniqueID[11] = HexLookup[(mac[5] & 0xf0) >> 4];
+  uniqueID[12] = HexLookup[(mac[5] & 0x0f)];
+  uniqueID[13] = 0;
+  String UID = String(uniqueID);
+  BotType = BotType + UID + "\"}";    // Complete contstruction of Json messages
+}
 
 void botFind(String from) {
   socket.emit("here", ID + "\"" + from + "\"" + StatusKey + status + BotType);
+}
+
+void botConnect(){
+  status = "open";
+  socket.emit("here", ID + "false" + StatusKey + status + BotType);
 }
 
 void own(String from) {
@@ -276,6 +292,7 @@ void setup() {
   Serial.begin(115200);
 
   // setupNetwork();
+  getUniqueID();
   findWifi();
 
   socket.on("botFind", botFind);
@@ -291,7 +308,10 @@ void setup() {
 void loop() {
   timer.todoChecker();
   if (WiFi.status() == WL_CONNECTED){
-    socket.monitor();
+    if(socket.monitor()){ // returns true on connect
+        Serial.println("connect event");
+        botConnect();      // signal open on connect
+    }
   }
 }
 
